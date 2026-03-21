@@ -1,4 +1,5 @@
-target
+target/*
+!target/my-spring-api.jar
 .git
 .idea
 .vscode
