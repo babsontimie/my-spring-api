@@ -12,13 +12,32 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        java: [21]
+        java: [17, 21]
 
     permissions:
       contents: read
       packages: write
 
     steps:
+      # 0️⃣ Non-interactive Debug Mode (inspect runner)
+      - name: Debug Runner
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        run: |
+          echo "===== Runner Info ====="
+          uname -a
+          whoami
+          pwd
+          ls -la
+          echo "===== Java ====="
+          java -version
+          echo "===== Maven ====="
+          mvn -version
+          echo "===== Docker ====="
+          docker version
+          echo "===== Environment Variables ====="
+          printenv | sort
+          echo "===== End Debug Info ====="
+
       # 1️⃣ Checkout code
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,29 +50,22 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: 'maven'
 
-      # 3️⃣ Debug matrix info
-      - name: Debug matrix
-        run: |
-          echo "Running Java version: ${{ matrix.java }}"
-          echo "GitHub ref: ${{ github.ref }}"
-          java -version
-
-      # 4️⃣ Build and run tests
+      # 3️⃣ Build and run tests
       - name: Build and run tests
         run: mvn -B -V clean test
 
-      # 5️⃣ Package jar
+      # 4️⃣ Package jar
       - name: Package (create jar)
         run: mvn -B -V -DskipTests package
 
-      # 6️⃣ Upload artifact
+      # 5️⃣ Upload artifact
       - name: Upload artifact (jar)
         uses: actions/upload-artifact@v4
         with:
           name: my-spring-api-jar
           path: target/*.jar
 
-      # 7️⃣ Docker login GHCR (Java 21 only)
+      # 6️⃣ Docker login GHCR (Java 21 only)
       - name: Log in to GitHub Container Registry
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         uses: docker/login-action@v2
@@ -62,7 +74,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 8️⃣ Docker login Docker Hub (Java 21 only)
+      # 7️⃣ Docker login Docker Hub (Java 21 only)
       - name: Log in to Docker Hub
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         uses: docker/login-action@v2
@@ -71,7 +83,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      # 9️⃣ Build and push Docker image (Java 21 only)
+      # 8️⃣ Build and push Docker image (Java 21 only)
       - name: Build and push Docker images
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         run: |
@@ -86,7 +98,7 @@ jobs:
           docker push $GHCR_IMAGE
           docker push $DOCKERHUB_IMAGE
 
-      # 🔟 Install kind (Java 21 only)
+      # 9️⃣ Install kind (Java 21 only)
       - name: Install kind
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         run: |
@@ -95,7 +107,7 @@ jobs:
           sudo mv ./kind /usr/local/bin/kind
           kind version
 
-      # 1️⃣1️⃣ Create kind cluster (Java 21 only)
+      # 1️⃣0️⃣ Create kind cluster (Java 21 only)
       - name: Create kind cluster
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         run: |
@@ -109,27 +121,20 @@ jobs:
           EOF
           kind create cluster --name kind-teetestcluster --config kind-cluster.yaml
 
-      # 1️⃣2️⃣ Load Docker images into kind (Java 21 only)
+      # 1️⃣1️⃣ Load Docker images into kind (Java 21 only)
       - name: Load Docker images into kind
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
-          echo "Loading Docker images into kind cluster..."
           kind load docker-image ghcr.io/${{ github.repository_owner }}/my-spring-api:$SHORT_SHA --name kind-teetestcluster
           kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/my-spring-api:$SHORT_SHA --name kind-teetestcluster
 
-      # 1️⃣3️⃣ Deploy Spring Boot app to kind using k8s folder
+      # 1️⃣2️⃣ Deploy Spring Boot app to kind using k8s folder
       - name: Deploy Spring API to kind
         if: github.ref == 'refs/heads/main' && matrix.java == '21'
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
-
-          echo "Updating deployment.yaml with image tag..."
           sed -i "s|IMAGE_PLACEHOLDER|ghcr.io/${{ github.repository_owner }}/my-spring-api:$SHORT_SHA|g" k8s/deployment.yaml
-
-          echo "Applying Kubernetes manifests..."
           kubectl apply -f k8s/
-
-          echo "Waiting for pods to be ready..."
           kubectl wait --for=condition=ready pod -l app=my-spring-api --timeout=180s
           kubectl get pods -o wide
