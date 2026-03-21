@@ -2,9 +2,11 @@
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
+# Copy Maven config and resolve dependencies first (cacheable)
 COPY pom.xml .
 RUN mvn -B dependency:resolve dependency:resolve-plugins
 
+# Copy source code and build jar
 COPY src ./src
 RUN mvn -B -DskipTests package
 
@@ -12,7 +14,8 @@ RUN mvn -B -DskipTests package
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
-ARG JAR_FILE=*.jar
+# Accept JAR file name from build-arg
+ARG JAR_FILE
 COPY --from=builder /app/target/${JAR_FILE} app.jar
 
 EXPOSE 8080
