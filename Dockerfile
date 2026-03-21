@@ -1,4 +1,4 @@
-# --- Build stage ---
+# -------- Build stage --------
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
@@ -8,7 +8,7 @@ RUN mvn -B dependency:resolve dependency:resolve-plugins
 COPY src ./src
 RUN mvn -B -DskipTests package
 
-# --- Runtime stage ---
+# -------- Runtime stage --------
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 
