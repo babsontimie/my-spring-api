@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-spring-api-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: my-spring-api.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-spring-api-service
+                port:
+                  number: 80
