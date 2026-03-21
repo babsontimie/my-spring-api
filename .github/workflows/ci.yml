@@ -1,4 +1,4 @@
-name: CI - Java matrix (17, 21)
+name: CI - Java Build & Deploy
 
 on:
   push:
@@ -7,113 +7,102 @@ on:
     branches: [ '**' ]
 
 jobs:
-  build:
-    name: Build and test (Java ${{ matrix.java }})
+  build-and-deploy:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # java: [17, 21]
-        java: [21]        
-
+        # java: [21, 17]  # include both, Maven will use valid version
+        java: [21]  # include both, Maven will use valid version        
     permissions:
       contents: read
       packages: write
 
     steps:
-      # 1️⃣ Checkout code
-      - name: Checkout
+      # --- Checkout code ---
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Setup JDK and cache Maven
-      - name: Set up JDK and cache Maven
+      # --- Set up JDK and cache Maven ---
+      - name: Set up JDK ${{ matrix.java }} and cache Maven
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: ${{ matrix.java }}
-          cache: 'maven'
+          cache: maven
 
-      # 3️⃣ Build and run tests
-      - name: Build and run tests
+      # --- Build and test ---
+      - name: Build & run tests
         run: mvn -B -V clean test
 
-      # 4️⃣ Package jar
-      - name: Package (create jar)
+      # --- Package JAR ---
+      - name: Package application
         run: mvn -B -V -DskipTests package
 
-      # 5️⃣ Detect JAR name dynamically
-      - name: Set JAR_FILE environment variable
-        id: jar-name
+      # --- Detect JAR dynamically ---
+      - name: Detect JAR file
+        id: jar
         run: |
           JAR_FILE=$(ls target/*.jar | xargs -n 1 basename)
           echo "JAR_FILE=$JAR_FILE" >> $GITHUB_ENV
           echo "Detected JAR: $JAR_FILE"
 
-      # 6️⃣ Docker login GHCR
+      # --- Upload artifact ---
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-spring-api-jar
+          path: target/*.jar
+
+      # --- Login to GHCR ---
       - name: Log in to GitHub Container Registry
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
         uses: docker/login-action@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 7️⃣ Docker login Docker Hub
+      # --- Login to Docker Hub ---
       - name: Log in to Docker Hub
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
         uses: docker/login-action@v2
         with:
-          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # 8️⃣ Build and push Docker images (multi-stage, dynamic JAR)
-      - name: Build and push Docker images
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
+      # --- Build and push Docker image ---
+      - name: Build & push Docker image
         run: |
           SHORT_SHA=${GITHUB_SHA::7}
           GHCR_IMAGE=ghcr.io/${{ github.repository_owner }}/my-spring-api:$SHORT_SHA
           DOCKERHUB_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/my-spring-api:$SHORT_SHA
-          echo "Building Docker images with JAR $JAR_FILE..."
+          
+          # Multi-stage build
           docker build --build-arg JAR_FILE=$JAR_FILE -f Dockerfile.runtime -t $GHCR_IMAGE -t $DOCKERHUB_IMAGE .
+          
+          # Push to both registries
           docker push $GHCR_IMAGE
           docker push $DOCKERHUB_IMAGE
 
-      # 9️⃣ Install kind
-      - name: Install kind
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+      # --- Create kind cluster ---
+      - name: Set up kind cluster
+        uses: engineerd/setup-kind@v1
+        with:
+          version: v1.30.0
+          name: my-spring-api-cluster
+          wait: 60
 
-      # 🔟 Create kind cluster
-      - name: Create kind cluster
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
+      # --- Load Docker image into kind ---
+      - name: Load Docker image into kind
         run: |
-          cat <<EOF > kind-cluster.yaml
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-            - role: control-plane
-            - role: worker
-            - role: worker
-          EOF
-          kind create cluster --name kind-teetestcluster --config kind-cluster.yaml
+          kind load docker-image ghcr.io/${{ github.repository_owner }}/my-spring-api:${GITHUB_SHA::7} --name my-spring-api-cluster
 
-      # 1️⃣1️⃣ Load Docker images into kind
-      - name: Load Docker images into kind
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
+      # --- Deploy to cluster using existing manifests ---
+      - name: Deploy to kind cluster
         run: |
-          SHORT_SHA=${GITHUB_SHA::7}
-          kind load docker-image ghcr.io/${{ github.repository_owner }}/my-spring-api:$SHORT_SHA --name kind-teetestcluster
-          kind load docker-image ${{ secrets.DOCKERHUB_USERNAME }}/my-spring-api:$SHORT_SHA --name kind-teetestcluster
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/ingress.yaml
 
-      # 1️⃣2️⃣ Deploy Spring API to kind using k8s manifests
-      - name: Deploy Spring API to kind
-        if: github.ref == 'refs/heads/main' && matrix.java == '21'
+      # --- Wait for deployment to be ready ---
+      - name: Wait for deployment rollout
         run: |
-          SHORT_SHA=${GITHUB_SHA::7}
-          sed -i "s|IMAGE_PLACEHOLDER|ghcr.io/${{ github.repository_owner }}/my-spring-api:$SHORT_SHA|g" k8s/deployment.yaml
-          kubectl apply -f k8s/
-          kubectl wait --for=condition=ready pod -l app=my-spring-api --timeout=180s
-          kubectl get pods -o wide
+          kubectl rollout status deployment/my-spring-api --timeout=2m
