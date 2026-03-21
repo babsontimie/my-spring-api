@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: my-spring-api
-          image: your-dockerhub-username/my-spring-api:1.0.0
+          image: ghcr.io/babsontimie/my-spring-api:3df1064b65a00ca7f5cbc01a77ab4708866d916d
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
