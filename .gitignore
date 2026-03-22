@@ -1,7 +1,41 @@
-target/*
-!target/my-spring-api.jar
+# Java build directories
+target/
+build/
+
+# Java tools (Maven/Gradle) cache
 .mvn/
+.gradle/
+
+# Node.js modules
+node_modules/
+
+# IDE-specific files
 .idea/
 .vscode/
-*.iml
-.DS_Store
+
+# IntelliJ compiled output
+out/
+
+# Docker related files
+Dockerfile.*
+.docker/
+*.tar
+
+# Logs, temp files, and generated folders
+logs/
+tmp/
+*.log
+*.tmp
+
+# Build artifacts (JARs, WARs, EARs, etc)
+*.jar
+*.war
+*.ear
+
+# Environment configuration
+.env
+*.env
+
+# Operating System files
+.DS_Store  # macOS specific
+Thumbs.db  # Windows specific
